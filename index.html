@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<!--
+		The Bunny Game
+		Created by Allice, Eddie, Ngoc, John
+		Special thanks to Batiste Bieler and contributors for Sprite.js and more
+		All rights and permissions reserved to Che Chan.
+		-->
+		<title>Eddie Land</title>
+		<meta name="viewport" content="user-scalable=no, width=device-width">
+		<style type="text/css">body {margin: 0;}</style>
+		
+		<script src="sprite.js"></script>
+		<script src="lib/collision.js"></script>
+		<script src="lib/jquery-1.9.1.min.js"></script>
+		<script src="/socket.io/socket.io.js"></script>
+		<script type="text/javascript">
+			window.onload = function() {
+				sjs.debug = true;
+				
+				var scene = sjs.Scene({parent:document.getElementById("game"), w:512, h:320, autoPause: false});
+				var layer = scene.Layer("game_layer");
+				scene.loadImages([
+						'img/star.png',
+						'img/Bunnyyyy.png',
+						'img/BIG_BUNNY.png',
+						'img/BunnyVer1.000.png',
+						'img/cat.png',
+						'img/giraffe.png',
+						'img/turtle.png',
+						'img/Bunny.png',
+						'img/AllyIcon01.png',
+						'img/old_master.png',
+						'img/old_master_big.png',
+					],
+					function() {
+						engine = new Engine(scene, layer);
+						ticker = scene.Ticker(function() {
+							engine.run();
+						});
+						engine.setTicker(ticker);
+						ticker.run();
+					}
+				);
+			};
+				
+			function Engine(scene, layer) {
+				if (typeof(io) === 'undefined') {
+					document.getElementById('chatbox').innerHTML = "Not connected to server.";
+				}
+				else {
+					var thisEngine = this;
+					
+					this.scene = scene;
+					this.layer = layer;
+					this.ticker = null;
+					this.inputs = scene.Input();
+					this.setTicker = function(ticker) {
+						this.ticker = ticker;
+					}
+					this.spriteList = [];
+					this.gravity = 0.25;
+					
+					this.addPlayer = function(other, data) {
+						var player;
+						
+						if (other && data) {
+							player = this.scene.Sprite("img/Bunny.png", {
+								"layer": thisEngine.layer,
+								"x": data.x,
+								"y": data.y,
+								"w": 64,
+								"h": 64,
+								"angle": 0,
+								"xv": data.xv,
+								"yv": data.yv,
+								"rv": 0,
+								"xf": 0,
+								"yf": 0,
+								"friction": 0
+							});
+						}
+						else {
+							player = this.scene.Sprite("img/Bunny.png", {
+								"layer": thisEngine.layer,
+								"x": 150,
+								"y": 100,
+								"w": 64,
+								"h": 64,
+								"angle": 0,
+								"xv": 0,
+								"yv": 0,
+								"rv": 0,
+								"xf": 0,
+								"yf": 0,
+								"friction": 0
+							});
+						}
+						player.has_landed = false;
+						player.jump_velocity = -5;
+						
+						player.moveLeft = function() {
+							this.setVelocity(-2, this.yv);
+						};
+						
+						player.moveRight = function() {
+							this.setVelocity(2, this.yv);
+						};
+						
+						player.jumpUp = function() {
+							if(this.has_landed) {
+								this.has_landed = false;
+								this.setVelocity(this.xv, this.jump_velocity);
+							}
+						};
+						
+						player.updateMovement = function() {
+							if (!other) {
+								if(thisEngine.inputs.keyboard.up) {
+									this.jumpUp();
+								}
+								if(thisEngine.inputs.keyboard.left) {
+									this.moveLeft();
+								}
+								else if(thisEngine.inputs.keyboard.right) {
+									this.moveRight();
+								}
+								else {
+									this.setVelocity(0, this.yv);
+								}
+							}
+							
+							if (!this.has_landed) {
+								thisEngine.applyGravity(this);
+							}
+							
+							fixBoundPositions(this);
+							
+							this.applyVelocity(1);
+							this.update();
+						};
+						
+						thisEngine.spriteList.push(player);
+						return player;
+					};
+					
+					this.applyGravity = function(sprite) {
+						sprite.setVelocity(sprite.xv, sprite.yv + thisEngine.gravity);
+					}
+					
+					fixBoundPositions = function(sprite) {
+						if((sprite.xv < 0) && (sprite.x + sprite.xv) < 0) {
+							sprite.setVelocity(0, sprite.yv);
+							sprite.setX(0);
+						}
+						else if((sprite.xv > 0) && (((sprite.x + sprite.xv) + sprite.w) > sprite.layer.w)) {
+							sprite.setVelocity(0, sprite.yv);
+							sprite.setX(sprite.layer.w - sprite.w);
+						}
+						
+						if((sprite.yv < 0) && ((sprite.y + sprite.yv) < 0)) {
+							sprite.setVelocity(sprite.xv, 0);
+							sprite.setY(0);
+						}
+						else if((sprite.yv > 0) && (((sprite.y + sprite.yv) + sprite.h) > sprite.layer.h)) {
+							sprite.has_landed = true;
+							sprite.setVelocity(sprite.xv, 0);
+							sprite.setY(sprite.layer.h - sprite.h);
+						}
+					}
+					
+					this.run = function() {
+						for (var i in thisEngine.spriteList) {
+							thisEngine.spriteList[i].updateMovement();
+						}
+					}
+					
+					this.convertToJson = function(sprite) {
+						return {x: sprite.x, y: sprite.y, xv: sprite.xv, yv: sprite.yv};
+					};
+				
+					var socket = io.connect('http://localhost:4000', {'sync disconnect on unload': true});
+					//var socket = io.connect('', {'sync disconnect on unload': true});
+
+					socket.on('user connected', function (data) {
+						document.getElementById('numUsers').innerHTML = data.nUsers;
+						document.getElementById('chatbox').innerHTML = "You're connected." + "\n" + document.getElementById('chatbox').innerHTML;
+						
+						socket.emit('add player', thisEngine.convertToJson(thisEngine.addPlayer()));
+					});
+					socket.on('update players', function (data) {
+						if (thisEngine.spriteList[data[0]]) {
+							thisEngine.addPlayer(1, data[1]);
+						}
+					});
+					socket.on('user disconnected', function (nUsers) {
+						document.getElementById('numUsers').innerHTML = nUsers;
+					});
+					socket.on('update chatbox', function (text) {
+						document.getElementById('chatbox').innerHTML = text + "\n" + document.getElementById('chatbox').innerHTML;
+					});
+
+					$(document).keyup(function(e) {
+						if ((e.keyCode == 13) && $("#userInput").is(":focus"))
+						{
+							socket.emit('update chatbox', $("#userInput").val());
+							$("#userInput").val("")
+						}
+					});
+				}
+			}
+			
+			function debug(text) {
+				console.log(text);
+			}
+		</script>
+	</head>
+	<body>
+		<div id="game"></div>
+		<div id="game2"></div>
+		
+		<textarea id="chatbox" rows="3" cols="50" readonly = "readonly" style="resize:none"></textarea>
+		<br />
+		<input type="text" id="userInput" size="50">
+		<br />
+		Current players: <span id='numUsers'></span>
+	</body>
+</html>
